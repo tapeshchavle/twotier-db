@@ -2,7 +2,7 @@ spring:
   application:
     name: two-tier-db
 
-  # ── PostgreSQL ──
+  # ── PostgreSQL (Users, structured data) ──
   datasource:
     url: jdbc:postgresql://localhost:5432/twotierdb
     username: postgres
@@ -17,16 +17,10 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
-  # ── MongoDB ──
+  # ── MongoDB (Posts, document data) ──
   data:
     mongodb:
       uri: mongodb://localhost:27017/twotierdb
-
-# ── Application Config ──
-app:
-  database:
-    default-type: POSTGRES        # POSTGRES | MONGODB
-    dual-write-enabled: false     # Write to both DBs simultaneously
 
 server:
   port: 8080

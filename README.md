@@ -6,312 +6,197 @@
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
 </p>
 
-# 🏗️ Two-Tier Database — Scalable Multi-Database Architecture
+# 🏗️ Two-Tier Database — Polyglot Persistence Architecture
 
-> A **plug-and-play database abstraction layer** for Spring Boot that supports **PostgreSQL** (SQL) and **MongoDB** (NoSQL) out of the box — add any new database (Cassandra, MySQL, DynamoDB) with **zero changes to existing code**.
+> A production-grade **polyglot persistence** architecture where **different entities live in different databases**: Users in PostgreSQL, Posts in MongoDB — extensible to any new database with zero changes to existing code.
 
 ---
 
 ## 📑 Table of Contents
 
-- [Why This Architecture?](#-why-this-architecture)
-- [System Design Overview](#-system-design-overview)
-- [Design Patterns Used](#-design-patterns-used)
-- [Architecture Deep Dive](#-architecture-deep-dive)
+- [Architecture Overview](#-architecture-overview)
+- [System Design — Polyglot Persistence](#-system-design--polyglot-persistence)
 - [Project Structure](#-project-structure)
-- [How It Works — Request Flow](#-how-it-works--request-flow)
+- [Request Flow Diagrams](#-request-flow-diagrams)
 - [How to Add a New Database](#-how-to-add-a-new-database)
 - [API Reference](#-api-reference)
 - [Getting Started](#-getting-started)
-- [Configuration](#%EF%B8%8F-configuration)
 - [Tech Stack](#-tech-stack)
 
 ---
 
-## 🤔 Why This Architecture?
-
-Most applications start with a single database but inevitably need to support multiple databases as they scale:
-
-| Scenario | Solution |
-|----------|----------|
-| **Structured data** (users, orders, transactions) | PostgreSQL (ACID-compliant, relational) |
-| **Unstructured/flexible data** (logs, analytics, documents) | MongoDB (schema-less, horizontal scaling) |
-| **Future needs** (time-series, graph, cache) | Add Cassandra, Neo4j, Redis — without rewriting |
-
-**The problem:** Without proper abstraction, adding a new database means modifying service layers, creating new DAOs, and potentially breaking existing functionality.
-
-**Our solution:** An **SPI (Service Provider Interface)** that auto-discovers new database adapters at startup — new databases are "plugged in" like USB devices.
-
----
-
-## 🏛️ System Design Overview
-
-### High-Level Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         CLIENT (REST API)                            │
-│                      POST/GET /api/users                             │
-└──────────────────────────┬───────────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                       CONTROLLER LAYER                               │
-│                      UserController.java                             │
-│              (Accepts ?source=postgres|mongodb)                      │
-└──────────────────────────┬───────────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                        SERVICE LAYER                                 │
-│         UserService.java  ←→  UserMapper.java                        │
-│    (Domain model User — completely database-agnostic)                │
-└──────────────────────────┬───────────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                    ★ CORE ABSTRACTION (SPI) ★                        │
-│  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────────┐    │
-│  │DatabaseRouter│→ │DatabaseClient    │→ │DatabaseRepository    │    │
-│  │  (Facade)   │  │  Factory         │  │  <T, ID>             │    │
-│  │             │  │  (Auto-discovers) │  │  (Strategy Interface)│    │
-│  └─────────────┘  └──────────────────┘  └──────────┬───────────┘    │
-└─────────────────────────────────────────────────────┼────────────────┘
-                           ┌──────────────────────────┼───────┐
-                           │                          │       │
-                           ▼                          ▼       ▼
-              ┌────────────────────┐    ┌──────────────────────────┐
-              │  POSTGRES MODULE   │    │    MONGODB MODULE         │
-              │ ┌────────────────┐ │    │ ┌──────────────────────┐ │
-              │ │ PostgresUser   │ │    │ │ MongoUser             │ │
-              │ │ RepoAdapter    │ │    │ │ RepoAdapter           │ │
-              │ └───────┬────────┘ │    │ └──────────┬───────────┘ │
-              │         ▼          │    │            ▼             │
-              │ ┌────────────────┐ │    │ ┌──────────────────────┐ │
-              │ │ UserJpa        │ │    │ │ UserMongo             │ │
-              │ │ Repository     │ │    │ │ Repository            │ │
-              │ └───────┬────────┘ │    │ └──────────┬───────────┘ │
-              │         ▼          │    │            ▼             │
-              │    ┌─────────┐     │    │     ┌───────────┐       │
-              │    │PostgreSQL│     │    │     │  MongoDB  │       │
-              │    └─────────┘     │    │     └───────────┘       │
-              └────────────────────┘    └──────────────────────────┘
-```
-
-### Component Interaction Diagram
+## 🏛️ Architecture Overview
 
 ```mermaid
 graph TB
-    subgraph "🌐 API Layer"
-        CTRL["UserController<br>REST Endpoints"]
+    subgraph "🌐 REST API"
+        UC["UserController<br>/api/users"]
+        PC["PostController<br>/api/posts"]
     end
 
     subgraph "⚙️ Service Layer"
-        SVC["UserService<br>Business Logic"]
-        MAP["UserMapper<br>Domain ↔ DB Entity"]
-        USER_MODEL["User (Domain POJO)<br>Database-Agnostic"]
+        US["UserService"]
+        PS["PostService"]
     end
 
-    subgraph "🔌 Core Abstraction Layer (SPI)"
-        ROUTER["DatabaseRouter<br>Routing Facade"]
-        FACTORY["DatabaseClientFactory<br>Auto-Discovery Factory"]
-        REPO["DatabaseRepository‹T,ID›<br>Strategy Interface"]
-        DBTYPE["DatabaseType<br>POSTGRES | MONGODB | ..."]
+    subgraph "🐘 PostgreSQL Tier"
+        UJR["UserJpaRepository"]
+        UE["UserEntity<br>@Entity @Table"]
+        PG[("PostgreSQL<br>users table")]
     end
 
-    subgraph "🐘 PostgreSQL Module"
-        PG_ADAPTER["PostgresUserRepositoryAdapter"]
-        PG_BASE["PostgresBaseEntity<br>@MappedSuperclass"]
-        PG_ENTITY["UserEntity<br>@Entity @Table"]
-        PG_JPA["UserJpaRepository<br>JpaRepository"]
-        PG[("PostgreSQL<br>Port 5432")]
+    subgraph "🍃 MongoDB Tier"
+        PMR["PostMongoRepository"]
+        PD["PostDocument<br>@Document"]
+        MONGO[("MongoDB<br>posts collection")]
     end
 
-    subgraph "🍃 MongoDB Module"
-        MONGO_ADAPTER["MongoUserRepositoryAdapter"]
-        MONGO_BASE["MongoBaseDocument<br>Abstract"]
-        MONGO_DOC["UserDocument<br>@Document"]
-        MONGO_REPO["UserMongoRepository<br>MongoRepository"]
-        MONGO[("MongoDB<br>Port 27017")]
-    end
+    UC --> US
+    PC --> PS
+    US --> UJR
+    PS --> PMR
+    PS -.->|"validates author"| UJR
+    UJR --> UE --> PG
+    PMR --> PD --> MONGO
 
-    subgraph "🔮 Future Databases (Zero Code Change)"
-        CASS["CassandraAdapter"]
-        MYSQL["MySQLAdapter"]
-        REDIS["RedisAdapter"]
-    end
-
-    CTRL -->|"User (Domain)"| SVC
-    SVC --> MAP
-    SVC --> USER_MODEL
-    SVC -->|"route()"| ROUTER
-    ROUTER -->|"resolve(type, class)"| FACTORY
-    FACTORY -->|"auto-discover"| REPO
-    FACTORY -.->|"Spring DI"| PG_ADAPTER
-    FACTORY -.->|"Spring DI"| MONGO_ADAPTER
-
-    PG_ADAPTER -->|"implements"| REPO
-    MONGO_ADAPTER -->|"implements"| REPO
-
-    PG_ADAPTER --> PG_JPA
-    PG_JPA --> PG
-    PG_ENTITY --> PG_BASE
-
-    MONGO_ADAPTER --> MONGO_REPO
-    MONGO_REPO --> MONGO
-    MONGO_DOC --> MONGO_BASE
-
-    REPO -.->|"future"| CASS
-    REPO -.->|"future"| MYSQL
-    REPO -.->|"future"| REDIS
-
-    ROUTER -->|"reads"| DBTYPE
-
-    style REPO fill:#4CAF50,color:#fff,stroke:#388E3C
-    style ROUTER fill:#2196F3,color:#fff,stroke:#1976D2
-    style FACTORY fill:#FF9800,color:#fff,stroke:#F57C00
-    style PG fill:#336791,color:#fff,stroke:#264D73
-    style MONGO fill:#4DB33D,color:#fff,stroke:#3D8C2F
-    style DBTYPE fill:#9C27B0,color:#fff,stroke:#7B1FA2
-    style CASS fill:#555,color:#aaa,stroke:#333,stroke-dasharray: 5 5
-    style MYSQL fill:#555,color:#aaa,stroke:#333,stroke-dasharray: 5 5
-    style REDIS fill:#555,color:#aaa,stroke:#333,stroke-dasharray: 5 5
+    style PG fill:#336791,color:#fff
+    style MONGO fill:#4DB33D,color:#fff
+    style US fill:#2196F3,color:#fff
+    style PS fill:#FF9800,color:#fff
 ```
+
+### Key Design Decision
+
+| Data | Database | Why |
+|------|----------|-----|
+| **Users** (name, email, phone) | PostgreSQL | Structured, relational, ACID transactions, unique constraints |
+| **Posts** (content, tags, media) | MongoDB | Flexible schema, nested arrays, document-oriented, horizontal scaling |
 
 ---
 
-## 🎯 Design Patterns Used
+## 🎯 System Design — Polyglot Persistence
 
-### 1. Strategy Pattern
-> **"Define a family of algorithms, encapsulate each one, and make them interchangeable."**
+**Polyglot Persistence** = using the **right database for the right data**. Instead of forcing everything into one database, each entity type lives in the database that best suits its data model.
 
-Each database adapter is a **strategy** that implements the `DatabaseRepository<T, ID>` interface. The system can switch between strategies (Postgres ↔ MongoDB) at runtime without modifying any client code.
+### Design Principles
 
-```java
-// The Strategy Interface
-public interface DatabaseRepository<T extends DatabaseEntity<ID>, ID> {
-    T save(T entity);
-    Optional<T> findById(ID id);
-    List<T> findAll();
-    void deleteById(ID id);
-    DatabaseType getDatabaseType();  // self-identification
-}
+```mermaid
+graph LR
+    subgraph "Principle 1: Entity-Database Binding"
+        U["User"] -->|"always"| PG["PostgreSQL"]
+        P["Post"] -->|"always"| MG["MongoDB"]
+    end
 
-// Strategy A: PostgreSQL
-@Component
-public class PostgresUserRepositoryAdapter implements DatabaseRepository<UserEntity, String> {
-    // delegates to Spring Data JPA
-}
+    subgraph "Principle 2: Cross-DB References"
+        P2["Post.authorId"] -.->|"references"| U2["User.id"]
+    end
 
-// Strategy B: MongoDB
-@Component
-public class MongoUserRepositoryAdapter implements DatabaseRepository<UserDocument, String> {
-    // delegates to Spring Data MongoDB
-}
+    subgraph "Principle 3: Denormalization"
+        P3["Post.authorName"] -.->|"copied from"| U3["User.name"]
+    end
+
+    style PG fill:#336791,color:#fff
+    style MG fill:#4DB33D,color:#fff
 ```
 
-```
-                    ┌─────────────────────┐
-                    │  DatabaseRepository  │  ← Strategy Interface
-                    │     <T, ID>          │
-                    └──────────┬──────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              │                │                │
-    ┌─────────▼──────┐  ┌─────▼────────┐  ┌────▼──────────┐
-    │ PostgresUser   │  │ MongoUser    │  │ CassandraUser │
-    │ RepoAdapter    │  │ RepoAdapter  │  │ RepoAdapter   │
-    │ (Strategy A)   │  │ (Strategy B) │  │ (Strategy C)  │
-    └────────────────┘  └──────────────┘  └───────────────┘
-         [EXISTS]           [EXISTS]         [FUTURE - 0 code change]
-```
+| Principle | Implementation |
+|-----------|---------------|
+| **Entity-Database Binding** | Each entity is permanently bound to one database. No routing, no switching. |
+| **Cross-DB References** | `Post.authorId` stores the PostgreSQL User ID — a foreign key across databases. |
+| **Denormalization** | `Post.authorName` is copied from User to avoid cross-DB joins at read time. |
+| **Service Orchestration** | `PostService` uses both `PostMongoRepository` AND `UserJpaRepository` to validate authors. |
+| **Open/Closed Principle** | Adding a new entity+database = new files only. Zero changes to existing code. |
 
-### 2. Abstract Factory Pattern
-> **"Provide an interface for creating families of related objects without specifying their concrete classes."**
+### Class Diagram
 
-`DatabaseClientFactory` collects ALL `DatabaseRepository` beans via Spring DI and indexes them by `(DatabaseType, EntityClass)`. It resolves the correct adapter at runtime.
-
-```java
-@Component
-public class DatabaseClientFactory {
-    // Spring auto-injects ALL DatabaseRepository beans
-    public DatabaseClientFactory(List<DatabaseRepository<?, ?>> repositories) {
-        for (DatabaseRepository<?, ?> repo : repositories) {
-            registry.put(repo.getDatabaseType(), repo.getEntityClass(), repo);
-        }
-        // New adapters are auto-registered — ZERO code changes!
+```mermaid
+classDiagram
+    class PostgresBaseEntity {
+        <<abstract>>
+        -id: String (UUID)
+        -createdAt: Instant
+        -updatedAt: Instant
     }
-    
-    public <T, ID> DatabaseRepository<T, ID> getRepository(DatabaseType type, Class<T> entityClass) {
-        return registry.get(type, entityClass);  // resolved at runtime
+
+    class UserEntity {
+        -name: String
+        -email: String
+        -phoneNumber: String
     }
-}
-```
 
-### 3. Facade Pattern
-> **"Provide a unified interface to a set of interfaces in a subsystem."**
+    class UserJpaRepository {
+        <<interface>>
+        +findByEmail(email) Optional
+        +existsByEmail(email) boolean
+    }
 
-`DatabaseRouter` is the single entry point for all database operations. Services never interact with adapters directly.
+    class UserService {
+        -userRepository: UserJpaRepository
+        +createUser(User) User
+        +getUserById(id) Optional
+        +getAllUsers() List
+        +deleteUser(id)
+    }
 
-```
-   UserService  ──→  DatabaseRouter  ──→  DatabaseClientFactory  ──→  Adapter
-   (simple API)      (unified facade)     (resolves correct one)      (actual DB)
-```
+    class UserController {
+        -userService: UserService
+        +POST /api/users
+        +GET /api/users
+        +GET /api/users/id
+        +DELETE /api/users/id
+    }
 
-### 4. SPI (Service Provider Interface)
-> **"An API intended to be implemented by third parties for extending a system."**
+    class MongoBaseDocument {
+        <<abstract>>
+        -id: String
+        -createdAt: Instant
+        -updatedAt: Instant
+    }
 
-New database adapters are discovered automatically at startup via Spring's component scanning. No registration code needed.
+    class PostDocument {
+        -authorId: String
+        -authorName: String
+        -title: String
+        -content: String
+        -tags: List
+        -mediaUrls: List
+        -likeCount: long
+        -commentCount: long
+    }
 
-### 5. Open/Closed Principle (SOLID)
-> **"Open for extension, closed for modification."**
+    class PostMongoRepository {
+        <<interface>>
+        +findByAuthorId(id) List
+        +findByTagsContaining(tag) List
+        +countByAuthorId(id) long
+    }
 
-| Action | Requires modifying existing code? |
-|--------|-----------------------------------|
-| Add a new database | ❌ No |
-| Add a new entity | ❌ No (just create new adapters) |
-| Change default database | ❌ No (just change `application.yml`) |
-| Enable dual-write | ❌ No (just flip config flag) |
+    class PostService {
+        -postRepository: PostMongoRepository
+        -userRepository: UserJpaRepository
+        +createPost(Post) Post
+        +getPostsByAuthor(id) List
+        +getPostsByTag(tag) List
+        +deletePost(id)
+    }
 
----
+    class PostController {
+        -postService: PostService
+        +POST /api/posts
+        +GET /api/posts
+        +GET /api/posts/id
+        +DELETE /api/posts/id
+    }
 
-## 🔍 Architecture Deep Dive
-
-### Core Layer (`core/`) — The Heart
-
-```
-core/
-├── DatabaseType.java          # Enum: POSTGRES, MONGODB (add new constants for new DBs)
-├── DatabaseEntity.java        # Marker interface: getId(), setId()
-├── DatabaseRepository.java    # Strategy interface: CRUD + getDatabaseType()
-├── DatabaseClientFactory.java # Abstract Factory: auto-discovers & resolves adapters
-└── DatabaseRouter.java        # Facade: routes ops based on config (default DB, dual-write)
-```
-
-**Key principle:** This layer has **zero dependencies on any database technology**. It only defines contracts (interfaces) and orchestration logic.
-
-### Database Modules — The Adapters
-
-Each database module follows an identical structure:
-
-```
-postgres/                              mongo/
-├── entity/                            ├── document/
-│   ├── PostgresBaseEntity.java        │   ├── MongoBaseDocument.java
-│   └── UserEntity.java               │   └── UserDocument.java
-├── repository/                        ├── repository/
-│   └── UserJpaRepository.java         │   └── UserMongoRepository.java
-└── adapter/                           └── adapter/
-    └── PostgresUserRepoAdapter.java       └── MongoUserRepoAdapter.java
-```
-
-### Dependency Direction (Clean Architecture)
-
-```
-Controller → Service → Core (interfaces) ← Adapters (implementations)
-                         ↑                         ↑
-                    NEVER reversed            NEVER access
-                                              core internals
+    PostgresBaseEntity <|-- UserEntity
+    MongoBaseDocument <|-- PostDocument
+    UserController --> UserService
+    UserService --> UserJpaRepository
+    UserJpaRepository --> UserEntity
+    PostController --> PostService
+    PostService --> PostMongoRepository
+    PostService --> UserJpaRepository
+    PostMongoRepository --> PostDocument
 ```
 
 ---
@@ -320,289 +205,221 @@ Controller → Service → Core (interfaces) ← Adapters (implementations)
 
 ```
 two-tier-db/
-├── docker-compose.yml                                    # PostgreSQL + MongoDB
-├── pom.xml                                               # Maven dependencies
+├── docker-compose.yml                                 # PostgreSQL + MongoDB
+├── pom.xml                                            # Maven dependencies
 ├── src/main/
 │   ├── java/com/twotier_db/
-│   │   ├── DemoApplication.java                          # Spring Boot entry point
+│   │   ├── DemoApplication.java                       # Entry point
 │   │   │
-│   │   ├── core/                                         # ★ ABSTRACTION LAYER
-│   │   │   ├── DatabaseType.java                         #   Enum (POSTGRES, MONGODB)
-│   │   │   ├── DatabaseEntity.java                       #   Marker interface
-│   │   │   ├── DatabaseRepository.java                   #   Strategy interface
-│   │   │   ├── DatabaseClientFactory.java                #   Auto-discovery factory
-│   │   │   └── DatabaseRouter.java                       #   Routing facade
+│   │   ├── config/                                    # ⚙️ DATABASE CONFIGS
+│   │   │   ├── PostgresConfig.java                    #   JPA + auditing
+│   │   │   └── MongoConfig.java                       #   MongoDB + auditing
 │   │   │
-│   │   ├── config/                                       # ⚙️ DB CONFIGURATIONS
-│   │   │   ├── PostgresConfig.java                       #   JPA / DataSource
-│   │   │   └── MongoConfig.java                          #   MongoClient / Template
-│   │   │
-│   │   ├── postgres/                                     # 🐘 POSTGRESQL MODULE
+│   │   ├── postgres/                                  # 🐘 POSTGRESQL MODULE
 │   │   │   ├── entity/
-│   │   │   │   ├── PostgresBaseEntity.java               #   Abstract MappedSuperclass
-│   │   │   │   └── UserEntity.java                       #   @Entity @Table("users")
-│   │   │   ├── repository/
-│   │   │   │   └── UserJpaRepository.java                #   JpaRepository
-│   │   │   └── adapter/
-│   │   │       └── PostgresUserRepositoryAdapter.java    #   Strategy implementation
+│   │   │   │   ├── PostgresBaseEntity.java            #   Base: id + timestamps
+│   │   │   │   └── UserEntity.java                    #   @Entity → users table
+│   │   │   └── repository/
+│   │   │       └── UserJpaRepository.java             #   Spring Data JPA
 │   │   │
-│   │   ├── mongo/                                        # 🍃 MONGODB MODULE
+│   │   ├── mongo/                                     # 🍃 MONGODB MODULE
 │   │   │   ├── document/
-│   │   │   │   ├── MongoBaseDocument.java                #   Abstract base document
-│   │   │   │   └── UserDocument.java                     #   @Document("users")
-│   │   │   ├── repository/
-│   │   │   │   └── UserMongoRepository.java              #   MongoRepository
-│   │   │   └── adapter/
-│   │   │       └── MongoUserRepositoryAdapter.java       #   Strategy implementation
+│   │   │   │   ├── MongoBaseDocument.java             #   Base: id + timestamps
+│   │   │   │   └── PostDocument.java                  #   @Document → posts collection
+│   │   │   └── repository/
+│   │   │       └── PostMongoRepository.java           #   Spring Data MongoDB
 │   │   │
-│   │   ├── model/                                        # 📦 DOMAIN LAYER
-│   │   │   ├── User.java                                 #   DB-agnostic POJO
-│   │   │   └── UserMapper.java                           #   Domain ↔ Entity mapper
+│   │   ├── model/                                     # 📦 DOMAIN MODELS
+│   │   │   ├── User.java                              #   DB-agnostic User POJO
+│   │   │   └── Post.java                              #   DB-agnostic Post POJO
 │   │   │
-│   │   ├── service/                                      # 🔧 BUSINESS LOGIC
-│   │   │   └── UserService.java
+│   │   ├── service/                                   # 🔧 BUSINESS LOGIC
+│   │   │   ├── UserService.java                       #   Users → PostgreSQL
+│   │   │   └── PostService.java                       #   Posts → MongoDB
 │   │   │
-│   │   └── controller/                                   # 🌐 REST API
-│   │       └── UserController.java
+│   │   └── controller/                                # 🌐 REST API
+│   │       ├── UserController.java                    #   /api/users
+│   │       └── PostController.java                    #   /api/posts
 │   │
 │   └── resources/
-│       └── application.yml                               # All DB configs
+│       └── application.yml
 └── README.md
 ```
 
 ---
 
-## 🔄 How It Works — Request Flow
+## 🔄 Request Flow Diagrams
 
-### Sequence Diagram: Create User
+### Create User → PostgreSQL
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Controller as UserController
-    participant Service as UserService
-    participant Mapper as UserMapper
-    participant Router as DatabaseRouter
-    participant Factory as DatabaseClientFactory
-    participant PGAdapter as PostgresAdapter
-    participant JPA as UserJpaRepository
-    participant PG as PostgreSQL
-    participant MongoAdapter as MongoAdapter
-    participant MongoRepo as UserMongoRepository
-    participant Mongo as MongoDB
+    participant UserController
+    participant UserService
+    participant UserJpaRepository
+    participant PostgreSQL
 
-    Client->>Controller: POST /api/users {name, email}
-    Controller->>Service: createUser(User)
-    
-    Note over Service: Check default DB type from config
-    
-    Service->>Mapper: toEntity(User)
-    Mapper-->>Service: UserEntity (JPA)
-    
-    Service->>Router: save(UserEntity, UserEntity.class)
-    Router->>Factory: getRepository(POSTGRES, UserEntity.class)
-    Factory-->>Router: PostgresAdapter
-    Router->>PGAdapter: save(UserEntity)
-    PGAdapter->>JPA: save(entity)
-    JPA->>PG: INSERT INTO users ...
-    PG-->>JPA: saved row
-    JPA-->>PGAdapter: UserEntity (with generated ID)
-    PGAdapter-->>Router: UserEntity
-    Router-->>Service: UserEntity
-    
-    alt Dual-Write Enabled
-        Service->>Mapper: toDocument(User)
-        Mapper-->>Service: UserDocument (Mongo)
-        Service->>Router: save(UserDocument, MONGODB)
-        Router->>Factory: getRepository(MONGODB, UserDocument.class)
-        Factory-->>Router: MongoAdapter
-        Router->>MongoAdapter: save(UserDocument)
-        MongoAdapter->>MongoRepo: save(doc)
-        MongoRepo->>Mongo: db.users.insertOne(...)
-        Mongo-->>MongoRepo: saved doc
-        MongoRepo-->>MongoAdapter: UserDocument
-    end
-    
-    Service->>Mapper: fromEntity(UserEntity)
-    Mapper-->>Service: User (Domain)
-    Service-->>Controller: User
-    Controller-->>Client: 201 Created {id, name, email, ...}
+    Client->>UserController: POST /api/users {name, email}
+    UserController->>UserService: createUser(User)
+    UserService->>UserService: toEntity(User) → UserEntity
+    UserService->>UserJpaRepository: save(UserEntity)
+    UserJpaRepository->>PostgreSQL: INSERT INTO users (id, name, email, ...) VALUES (...)
+    PostgreSQL-->>UserJpaRepository: saved row with UUID
+    UserJpaRepository-->>UserService: UserEntity
+    UserService->>UserService: fromEntity(UserEntity) → User
+    UserService-->>UserController: User
+    UserController-->>Client: 201 Created {id, name, email, createdAt}
 ```
 
-### Sequence Diagram: Query with Source Selection
+### Create Post → MongoDB (with PostgreSQL validation)
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Controller as UserController
-    participant Service as UserService
-    participant Router as DatabaseRouter
-    participant Factory as DatabaseClientFactory
-    participant MongoAdapter as MongoAdapter
-    participant Mongo as MongoDB
+    participant PostController
+    participant PostService
+    participant UserJpaRepository
+    participant PostgreSQL
+    participant PostMongoRepository
+    participant MongoDB
 
-    Client->>Controller: GET /api/users?source=mongodb
-    Controller->>Controller: resolveDatabaseType("mongodb")
-    Controller->>Service: getAllUsers(MONGODB)
-    Service->>Router: findAll(UserDocument.class, MONGODB)
-    Router->>Factory: getRepository(MONGODB, UserDocument.class)
-    Factory-->>Router: MongoAdapter
-    Router->>MongoAdapter: findAll()
-    MongoAdapter->>Mongo: db.users.find({})
-    Mongo-->>MongoAdapter: [documents]
-    MongoAdapter-->>Router: List‹UserDocument›
-    Router-->>Service: List‹UserDocument›
-    Service->>Service: map → List‹User› (via UserMapper)
-    Service-->>Controller: List‹User›
-    Controller-->>Client: 200 OK [{...}, {...}]
+    Client->>PostController: POST /api/posts {authorId, title, content, tags}
+    PostController->>PostService: createPost(Post)
+
+    Note over PostService: Cross-DB validation!
+    PostService->>UserJpaRepository: findById(authorId)
+    UserJpaRepository->>PostgreSQL: SELECT * FROM users WHERE id = ?
+    PostgreSQL-->>UserJpaRepository: UserEntity {name: "Tapesh"}
+    UserJpaRepository-->>PostService: UserEntity
+
+    Note over PostService: Denormalize author name
+    PostService->>PostService: doc.setAuthorName("Tapesh")
+
+    PostService->>PostMongoRepository: save(PostDocument)
+    PostMongoRepository->>MongoDB: db.posts.insertOne({authorId, authorName, title, ...})
+    MongoDB-->>PostMongoRepository: saved document
+    PostMongoRepository-->>PostService: PostDocument
+    PostService->>PostService: fromDocument(PostDocument) → Post
+    PostService-->>PostController: Post
+    PostController-->>Client: 201 Created {id, authorId, authorName, title, ...}
+```
+
+### Get Posts by Author
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant PostController
+    participant PostService
+    participant PostMongoRepository
+    participant MongoDB
+
+    Client->>PostController: GET /api/posts?authorId=abc-123
+    PostController->>PostService: getPostsByAuthor("abc-123")
+    PostService->>PostMongoRepository: findByAuthorIdOrderByCreatedAtDesc("abc-123")
+    PostMongoRepository->>MongoDB: db.posts.find({authorId: "abc-123"}).sort({createdAt: -1})
+    MongoDB-->>PostMongoRepository: [PostDocument, PostDocument, ...]
+    PostMongoRepository-->>PostService: List of PostDocuments
+    PostService->>PostService: map each → Post domain objects
+    PostService-->>PostController: List of Posts
+    PostController-->>Client: 200 OK [{...}, {...}]
 ```
 
 ---
 
 ## 🔌 How to Add a New Database
 
-Adding a new database (e.g., **Cassandra**) requires **exactly 3 steps** with **zero changes to existing code**.
-
-### Step-by-Step Guide
+Adding a new database (e.g., **Redis** for sessions) requires only **new files** — zero changes to existing code.
 
 ```mermaid
-flowchart LR
-    A["1️⃣ Add Dependency<br>pom.xml"] --> B["2️⃣ Create Module<br>cassandra/ package"]
-    B --> C["3️⃣ Add Enum Value<br>DatabaseType.CASSANDRA"]
-    C --> D["✅ Done!<br>Auto-discovered"]
-    
+flowchart TD
+    A["1️⃣ Add dependency to pom.xml<br>spring-boot-starter-data-redis"] --> B
+    B["2️⃣ Create config<br>config/RedisConfig.java"] --> C
+    C["3️⃣ Create entity<br>redis/entity/SessionEntity.java"] --> D
+    D["4️⃣ Create repository<br>redis/repository/SessionRedisRepository.java"] --> E
+    E["5️⃣ Create service<br>service/SessionService.java"] --> F
+    F["6️⃣ Create controller<br>controller/SessionController.java"] --> G
+    G["✅ Done! No existing files changed"]
+
     style A fill:#E3F2FD,stroke:#1976D2
-    style B fill:#E8F5E9,stroke:#388E3C
-    style C fill:#FFF3E0,stroke:#F57C00
-    style D fill:#4CAF50,color:#fff,stroke:#388E3C
+    style G fill:#4CAF50,color:#fff
 ```
 
-#### Step 1: Add the dependency
-
-```xml
-<!-- pom.xml -->
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-data-cassandra</artifactId>
-</dependency>
-```
-
-#### Step 2: Create the module package
+### Example: Adding Cassandra for Analytics
 
 ```
 cassandra/
 ├── entity/
-│   ├── CassandraBaseEntity.java       # Base entity with Cassandra annotations
-│   └── UserCassandraEntity.java       # @Table entity
+│   ├── CassandraBaseEntity.java
+│   └── AnalyticsEventEntity.java       # @Table
 ├── repository/
-│   └── UserCassandraRepository.java   # CassandraRepository<UserCassandraEntity, String>
-└── adapter/
-    └── CassandraUserRepositoryAdapter.java  # implements DatabaseRepository<...>
+│   └── AnalyticsEventRepository.java   # CassandraRepository<...>
 ```
 
-The adapter must implement `DatabaseRepository<T, ID>`:
-
 ```java
-@Component
-public class CassandraUserRepositoryAdapter 
-        implements DatabaseRepository<UserCassandraEntity, String> {
-    
-    private final UserCassandraRepository repository;
-    
-    // ... delegate all CRUD methods to repository ...
-    
-    @Override
-    public DatabaseType getDatabaseType() {
-        return DatabaseType.CASSANDRA;  // self-identify
-    }
-    
-    @Override
-    public Class<UserCassandraEntity> getEntityClass() {
-        return UserCassandraEntity.class;
-    }
+// service/AnalyticsService.java — directly uses CassandraRepository
+@Service
+public class AnalyticsService {
+    private final AnalyticsEventRepository analyticsRepo;
+    // ... no routing, no factory, just direct usage
 }
 ```
 
-#### Step 3: Add the enum constant
-
-```java
-public enum DatabaseType {
-    POSTGRES("PostgreSQL", Category.SQL),
-    MONGODB("MongoDB", Category.NOSQL),
-    CASSANDRA("Cassandra", Category.NOSQL);  // ← just add this line
-    // ...
-}
-```
-
-**That's it!** At startup, `DatabaseClientFactory` auto-discovers the new `CassandraUserRepositoryAdapter` via Spring DI and registers it. You can now:
-
-```bash
-# Query from Cassandra
-curl http://localhost:8080/api/users?source=cassandra
-
-# Set as default in application.yml
-app:
-  database:
-    default-type: CASSANDRA
-```
-
-### What You DON'T Need to Change
-
-| File | Change needed? |
-|------|---------------|
-| `DatabaseRepository.java` | ❌ No |
-| `DatabaseClientFactory.java` | ❌ No |
-| `DatabaseRouter.java` | ❌ No |
-| `UserService.java` | ❌ No |
-| `UserController.java` | ❌ No (just add `"cassandra"` case to resolver) |
-| Any existing adapter | ❌ No |
+**Files changed in existing code: 0**
 
 ---
 
 ## 📡 API Reference
 
-### Base URL: `http://localhost:8080/api/users`
+### Users (PostgreSQL)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/users` | Create a user |
+| `GET` | `/api/users` | List all users |
+| `GET` | `/api/users/{id}` | Get user by ID |
+| `DELETE` | `/api/users/{id}` | Delete a user |
+| `GET` | `/api/users/count` | Count users |
+
+### Posts (MongoDB)
 
 | Method | Endpoint | Query Params | Description |
 |--------|----------|-------------|-------------|
-| `POST` | `/api/users` | — | Create a new user |
-| `GET` | `/api/users` | `?source=postgres\|mongodb` | List all users |
-| `GET` | `/api/users/{id}` | `?source=postgres\|mongodb` | Get user by ID |
-| `DELETE` | `/api/users/{id}` | — | Delete a user |
-| `GET` | `/api/users/count` | — | Count users |
+| `POST` | `/api/posts` | — | Create a post (requires `authorId`) |
+| `GET` | `/api/posts` | `?authorId=...` or `?tag=...` | List posts (filterable) |
+| `GET` | `/api/posts/{id}` | — | Get post by ID |
+| `DELETE` | `/api/posts/{id}` | — | Delete a post |
+| `GET` | `/api/posts/count` | `?authorId=...` | Count posts by author |
 
-### Request/Response Examples
+### Usage Examples
 
-**Create User:**
 ```bash
+# 1. Create a user (→ PostgreSQL)
 curl -X POST http://localhost:8080/api/users \
   -H "Content-Type: application/json" \
+  -d '{"name":"Tapesh","email":"tapesh@example.com","phoneNumber":"+91-9999999999"}'
+
+# Response: {"id":"abc-123", "name":"Tapesh", "email":"tapesh@example.com", ...}
+
+# 2. Create a post by that user (→ MongoDB)
+curl -X POST http://localhost:8080/api/posts \
+  -H "Content-Type: application/json" \
   -d '{
-    "name": "Tapesh Chavle",
-    "email": "tapesh@example.com",
-    "phoneNumber": "+91-9999999999"
+    "authorId": "abc-123",
+    "title": "My First Post",
+    "content": "Hello from MongoDB!",
+    "tags": ["intro", "hello"],
+    "mediaUrls": ["https://example.com/photo.jpg"]
   }'
-```
 
-```json
-// Response: 201 Created
-{
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "name": "Tapesh Chavle",
-  "email": "tapesh@example.com",
-  "phoneNumber": "+91-9999999999",
-  "createdAt": "2026-04-30T02:15:00Z",
-  "updatedAt": "2026-04-30T02:15:00Z"
-}
-```
+# Response: {"id":"...", "authorId":"abc-123", "authorName":"Tapesh", "title":"My First Post", ...}
 
-**Query from a specific database:**
-```bash
-# From PostgreSQL
-curl http://localhost:8080/api/users?source=postgres
+# 3. Get all posts by author
+curl http://localhost:8080/api/posts?authorId=abc-123
 
-# From MongoDB
-curl http://localhost:8080/api/users?source=mongodb
+# 4. Get all posts with a tag
+curl http://localhost:8080/api/posts?tag=intro
 ```
 
 ---
@@ -610,85 +427,21 @@ curl http://localhost:8080/api/users?source=mongodb
 ## 🚀 Getting Started
 
 ### Prerequisites
-
 - Java 17+
 - Docker & Docker Compose
-- Maven (or use the included `mvnw` wrapper)
 
-### 1. Clone the repository
+### Run
 
 ```bash
 git clone https://github.com/tapeshchavle/multiple_db.git
 cd multiple_db
-```
 
-### 2. Start the databases
-
-```bash
+# Start databases
 docker-compose up -d
-```
 
-This spins up:
-- **PostgreSQL 16** on port `5432`
-- **MongoDB 7** on port `27017`
-
-### 3. Run the application
-
-```bash
+# Run the application
 ./mvnw spring-boot:run
 ```
-
-### 4. Test the API
-
-```bash
-# Create a user
-curl -X POST http://localhost:8080/api/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Tapesh","email":"tapesh@example.com"}'
-
-# List all users (default DB)
-curl http://localhost:8080/api/users
-
-# List from MongoDB specifically
-curl http://localhost:8080/api/users?source=mongodb
-
-# Count users
-curl http://localhost:8080/api/users/count
-```
-
----
-
-## ⚙️ Configuration
-
-All configuration is in `src/main/resources/application.yml`:
-
-```yaml
-spring:
-  # PostgreSQL
-  datasource:
-    url: jdbc:postgresql://localhost:5432/twotierdb
-    username: postgres
-    password: postgres
-  jpa:
-    hibernate:
-      ddl-auto: update
-
-  # MongoDB
-  data:
-    mongodb:
-      uri: mongodb://localhost:27017/twotierdb
-
-# Application-level database routing
-app:
-  database:
-    default-type: POSTGRES        # Which DB to use by default
-    dual-write-enabled: false     # Write to ALL registered DBs simultaneously
-```
-
-| Property | Values | Description |
-|----------|--------|-------------|
-| `app.database.default-type` | `POSTGRES`, `MONGODB` | Default database for all operations |
-| `app.database.dual-write-enabled` | `true`, `false` | Write to every registered DB on save/delete |
 
 ---
 
@@ -697,19 +450,12 @@ app:
 | Technology | Purpose |
 |-----------|---------|
 | **Spring Boot 4.0.6** | Application framework |
-| **Spring Data JPA** | PostgreSQL ORM |
-| **Spring Data MongoDB** | MongoDB ODM |
-| **PostgreSQL 16** | Relational (SQL) database |
-| **MongoDB 7** | Document (NoSQL) database |
+| **Spring Data JPA** | PostgreSQL ORM (Users) |
+| **Spring Data MongoDB** | MongoDB ODM (Posts) |
+| **PostgreSQL 16** | Relational database for Users |
+| **MongoDB 7** | Document database for Posts |
 | **Lombok** | Boilerplate reduction |
 | **Docker Compose** | Local database orchestration |
-| **Java 17** | Language runtime |
-
----
-
-## 📄 License
-
-This project is open-source and available under the [MIT License](LICENSE).
 
 ---
 

@@ -1,6 +1,5 @@
 package com.twotier_db.postgres.entity;
 
-import com.twotier_db.core.DatabaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.EntityListeners;
 import jakarta.persistence.GeneratedValue;
@@ -25,7 +24,7 @@ import java.time.Instant;
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter
-public abstract class PostgresBaseEntity implements DatabaseEntity<String> {
+public abstract class PostgresBaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

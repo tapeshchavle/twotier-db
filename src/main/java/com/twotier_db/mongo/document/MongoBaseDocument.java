@@ -1,6 +1,5 @@
 package com.twotier_db.mongo.document;
 
-import com.twotier_db.core.DatabaseEntity;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.data.annotation.CreatedDate;
@@ -17,7 +16,7 @@ import java.time.Instant;
  */
 @Getter
 @Setter
-public abstract class MongoBaseDocument implements DatabaseEntity<String> {
+public abstract class MongoBaseDocument {
 
     @Id
     private String id;

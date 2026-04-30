@@ -1,6 +1,5 @@
 package com.twotier_db.controller;
 
-import com.twotier_db.core.DatabaseType;
 import com.twotier_db.model.User;
 import com.twotier_db.service.UserService;
 import org.springframework.http.HttpStatus;
@@ -11,17 +10,15 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
 
 /**
- * REST controller for User CRUD operations.
+ * REST controller for User operations.
  * <p>
- * Supports optional {@code source} query parameter to target a specific
- * database: {@code ?source=postgres} or {@code ?source=mongodb}.
+ * Users are stored in <b>PostgreSQL</b>.
  */
 @RestController
 @RequestMapping("/api/users")
@@ -44,37 +41,17 @@ public class UserController {
 
     /**
      * GET /api/users — list all users.
-     * Optional: ?source=postgres|mongodb
      */
     @GetMapping
-    public ResponseEntity<List<User>> getAllUsers(
-            @RequestParam(required = false) String source) {
-
-        List<User> users;
-        if (source != null && !source.isBlank()) {
-            DatabaseType type = resolveDatabaseType(source);
-            users = userService.getAllUsers(type);
-        } else {
-            users = userService.getAllUsers();
-        }
-        return ResponseEntity.ok(users);
+    public ResponseEntity<List<User>> getAllUsers() {
+        return ResponseEntity.ok(userService.getAllUsers());
     }
 
     /**
      * GET /api/users/{id} — get a user by ID.
-     * Optional: ?source=postgres|mongodb
      */
     @GetMapping("/{id}")
-    public ResponseEntity<User> getUserById(
-            @PathVariable String id,
-            @RequestParam(required = false) String source) {
-
-        if (source != null && !source.isBlank()) {
-            DatabaseType type = resolveDatabaseType(source);
-            return userService.getUserById(id, type)
-                    .map(ResponseEntity::ok)
-                    .orElse(ResponseEntity.notFound().build());
-        }
+    public ResponseEntity<User> getUserById(@PathVariable String id) {
         return userService.getUserById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -90,23 +67,10 @@ public class UserController {
     }
 
     /**
-     * GET /api/users/count — count users in the default database.
+     * GET /api/users/count — count users.
      */
     @GetMapping("/count")
     public ResponseEntity<Map<String, Long>> countUsers() {
         return ResponseEntity.ok(Map.of("count", userService.countUsers()));
-    }
-
-    /**
-     * Resolve a source string to a {@link DatabaseType}.
-     */
-    private DatabaseType resolveDatabaseType(String source) {
-        return switch (source.toLowerCase()) {
-            case "postgres", "postgresql", "pg" -> DatabaseType.POSTGRES;
-            case "mongo", "mongodb" -> DatabaseType.MONGODB;
-            default -> throw new IllegalArgumentException(
-                    "Unknown database source: " + source
-                            + ". Supported: postgres, mongodb");
-        };
     }
 }
